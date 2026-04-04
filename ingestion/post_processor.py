@@ -44,3 +44,49 @@ def assemble_markdown(elements: list[Elementlike]) -> str:
             logger.debug(f"No prompt mapping for label '{el.label}'. Using raw text.")
             markdown_parts.append(el.text)
     return "\n\n".join(markdown_parts).strip()
+
+def save_to_json(result:Any,output_dir:Path) -> None:
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    stem = Path(result.source_file).stem
+
+    full_markdown = getattr(result, "full_markdown", '') or ''
+    if not full_markdown:
+        all_markdown_parts : list[str] = []
+        for page in result.pages:
+            if page.markdown:
+                all_markdown_parts.append(page.markdown)
+        full_markdown = "\n\n".join(all_markdown_parts).strip()
+
+    md_path = output_dir / f"{stem}.md"
+    md_path.write_text(full_markdown, encoding="utf-8")
+    logger.info(f"Saved markdown to {md_path}")
+
+    # Structuring for Json output
+
+    pages_data = []
+    for page in result.pages:
+        elements_data = []
+        for el in page.elements:
+            elements_data.append({
+                "label": el.label,
+                "text": el.text,
+                "bbox": el.bbox,
+                "score": el.score,
+                "reading_order": el.reading_order
+            })
+        pages_data.append({
+            "page_num": page.page_num,
+            "elements": elements_data,
+            "markdown": page.markdown
+        })
+    json_data = {
+        "source_file": result.source_file,
+        "total_elements": result.total_elements,
+        "full_markdown": full_markdown
+    }
+    json_path = output_dir / f"{stem}.json"
+    json_path.write_text(json.dumps(json_data, indent=2, ensure_ascii=False), encoding="utf-8")
+    logger.info(f"Saved json to {json_path}")
+
+        

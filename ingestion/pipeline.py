@@ -8,7 +8,7 @@ from typing import List,Any
 
 from config import get_settings
 from ingestion.pdf_utils import pdf_to_images,count_pdf_pages
-from ingestion.post_processor import assemble_markdown
+from ingestion.post_processor import assemble_markdown,save_to_json
 
 logger = logging.getLogger(__name__)
 
@@ -71,6 +71,9 @@ class ParseResult:
             total_elements=total_elements,
             full_markdown=full_markdown
         )
+
+    def save(self,output_dir:Path) -> None:
+        save_to_json(self,output_dir)   
 
 
 
