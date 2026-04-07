@@ -40,7 +40,7 @@ def _infer_modality(element_type:List[str]) -> str:
         return "text"
 
 @dataclass
-class chunk:
+class Chunk:
     text:str
     chunk_id:str
     page:int
@@ -75,7 +75,7 @@ def _split_text_into_chunks(text:str,chunk_size:int,overlap:int) -> List[str]:
 def document_aware_chunk(element:list[tuple[int,List[Elementlike]]],
                          source_file:str,
                          max_chunk_size:int = 512,
-                         overlap:int = 50) -> list[chunk]:
+                         overlap:int = 50) -> list[Chunk]:
 
     all_pairs : List[tuple[int,str]] = []
 
@@ -88,11 +88,11 @@ def document_aware_chunk(element:list[tuple[int,List[Elementlike]]],
     
     all_pairs.sort(key=lambda x: (x[0], x[1].reading_order))
 
-    chunks: list[chunk] = []
+    chunks: list[Chunk] = []
     chunk_id=0
 
-    current_texts = list[str]=[]
-    current_labels = list[str]=[]
+    current_texts : list[str]=[]
+    current_labels : list[str]=[]
     current_tokens: int = 0
     current_page: int = all_pairs[0][0]
 
@@ -101,7 +101,7 @@ def document_aware_chunk(element:list[tuple[int,List[Elementlike]]],
     pending_title_page: int = current_page
 
     def flush_current() -> None:
-        nonlocal current_texts, current_labels, current_page, current_tokens
+        nonlocal current_texts, current_labels, current_page, current_tokens,chunk_id
         nonlocal pending_title, pending_title_label, pending_title_page
 
         if not current_texts and not pending_title:
@@ -112,10 +112,19 @@ def document_aware_chunk(element:list[tuple[int,List[Elementlike]]],
 
         page_to_use = pending_title_page if (pending_title and not current_texts) else current_page
 
+        if pending_title is not None:
+            texts_to_flush.append(pending_title)
+            labels_to_flush.append(pending_title_label or "paragraph_title")
+            pending_title = None
+            pending_title_label = None
+            
+        texts_to_flush.extend(current_texts)
+        labels_to_flush.extend(current_labels)
+
         if not texts_to_flush:
             return  
         
-        chunk= chunk(
+        chunk= Chunk(
             text=" ".join(texts_to_flush),
             chunk_id=f"{source_file}_{page_to_use}_{chunk_id}",
             page=page_to_use,
@@ -151,7 +160,7 @@ def document_aware_chunk(element:list[tuple[int,List[Elementlike]]],
                 atomic_text = text
                 atomic_labels = [label]
 
-            atomic_chunk = chunk(
+            atomic_chunk = Chunk(
                 text=atomic_text,
                 chunk_id=f"{source_file}_{page_num}_{chunk_id}",
                 page=page_num,
@@ -164,6 +173,10 @@ def document_aware_chunk(element:list[tuple[int,List[Elementlike]]],
             chunks.append(atomic_chunk)
             chunk_id +=1
             continue
+
+        if not text:
+            continue
+
         
         if label in TITLE_LABELS:
             if current_texts:
@@ -182,7 +195,7 @@ def document_aware_chunk(element:list[tuple[int,List[Elementlike]]],
             flush_current()
             sub_chunks = _split_text_into_chunks(text, max_chunk_size, overlap=overlap)
             for sub_chunk in sub_chunks:
-                chunk = chunk(
+                chunk = Chunk(
                     text=sub_chunk,
                     chunk_id=f"{source_file}_{page_num}_{chunk_id}",
                     page=page_num,
@@ -233,12 +246,23 @@ if __name__ == "__main__":
     import json
     from pathlib import Path
 
+
+    from dataclasses import dataclass
+
+    @dataclass
+    class TestElement:
+        label: str
+        text: str
+        bbox: list
+        score: float
+        reading_order: int
+
     test_elements = [
-        Elementlike(label="document_title", text="Test Document", bbox=[0,0,100,20], score=0.9, reading_order=1),
-        Elementlike(label="paragraph_title", text="Introduction", bbox=[0,30,100,50], score=0.9, reading_order=2),
-        Elementlike(label="paragraph", text="This is the first paragraph of the document.", bbox=[0,60,100,80], score=0.9, reading_order=3),
-        Elementlike(label="paragraph", text="This is the second paragraph of the document.", bbox=[0,90,100,110], score=0.9, reading_order=4),
-        Elementlike(label="table", text="Table content here", bbox=[0,120,100,150], score=0.9, reading_order=5)
+    TestElement(label="document_title", text="Test Document", bbox=[0,0,100,20], score=0.9, reading_order=1),
+    TestElement(label="paragraph_title", text="Introduction", bbox=[0,30,100,50], score=0.9, reading_order=2),
+    TestElement(label="paragraph", text="This is the first paragraph of the document.", bbox=[0,60,100,80], score=0.9, reading_order=3),
+    TestElement(label="paragraph", text="This is the second paragraph of the document.", bbox=[0,90,100,110], score=0.9, reading_order=4),
+    TestElement(label="table", text="Table content here", bbox=[0,120,100,150], score=0.9, reading_order=5)
     ]
 
     chunks = structure_aware_chunk(test_elements, "test_file.pdf", page=1, max_chunk_size=50, overlap=10)
