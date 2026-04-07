@@ -235,7 +235,7 @@ def document_aware_chunk(element:list[tuple[int,List[Elementlike]]],
 def structure_aware_chunk(elements: list[Elementlike], 
                           source_file:str,
                           page:int,
-                          max_chunk_size: int, overlap: int) -> list[chunk]:
+                          max_chunk_size: int, overlap: int) -> list[Chunk]:
     
     final_chunk = document_aware_chunk([(page,elements)],
                                        source_file,max_chunk_size, overlap)
