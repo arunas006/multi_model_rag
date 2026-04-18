@@ -172,8 +172,9 @@ class DocumentParser:
     
 if __name__ == "__main__":
 
-    file_path = r"C:\dev\multi_model_rag\ingestion\test_data\data"
+    # file_path = r"C:\dev\multi_model_rag\ingestion\test_data\data"
     # file_path = r"C:\dev\multi_model_rag\ingestion\test_data\graph.jpg"
+    file_path = r"C:\dev\multi_model_rag\ingestion\test_data\data"
     output_dir = Path(r"C:\dev\multi_model_rag\ingestion\test_output")
     pdf_files = list(Path(file_path).glob("*.pdf"))
     parser = DocumentParser()
