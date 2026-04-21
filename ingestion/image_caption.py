@@ -105,24 +105,141 @@ def _get_surrounding_text(chunks: list[Chunk], idx:int, max_chars: int = 400) ->
     combined = "....".join(parts)
     return combined[:max_chars * 2] if combined else ""
 
+def _merge_nearby_bboxes(chunks: list[Chunk], y_threshold: int = 120, x_threshold: int = 500) -> list[Chunk]:
+    """
+    Merge nearby IMAGE chunks (charts/images split into fragments)
+    - Only merges modality == "image"
+    - Uses both vertical + horizontal proximity
+    - Preserves text/table chunks
+    """
+
+    merged_chunks = []
+    used = set()
+
+    for i, c1 in enumerate(chunks):
+
+        if (
+            i in used
+            or c1.bbox is None
+            or (c1.modality or "").lower() != "image"
+        ):
+            continue
+
+        x1, y1, x2, y2 = map(int, c1.bbox)
+        used.add(i)
+
+        for j, c2 in enumerate(chunks[i + 1:], start=i + 1):
+
+            if (
+                j in used
+                or c2.bbox is None
+                or (c2.modality or "").lower() != "image"
+                or c1.page != c2.page
+            ):
+                continue
+
+            x1b, y1b, x2b, y2b = map(int, c2.bbox)
+
+            # 🔥 KEY: both vertical + horizontal proximity
+            if (
+                abs(y1 - y1b) < y_threshold and
+                abs((x1 + x2) / 2 - (x1b + x2b) / 2) < x_threshold
+            ):
+                x1 = min(x1, x1b)
+                y1 = min(y1, y1b)
+                x2 = max(x2, x2b)
+                y2 = max(y2, y2b)
+                used.add(j)
+
+        # update merged bbox
+        c1.bbox = [x1, y1, x2, y2]
+        merged_chunks.append(c1)
+
+    # ✅ add remaining chunks (text, table, etc.)
+    for i, c in enumerate(chunks):
+        if i not in used:
+            merged_chunks.append(c)
+
+    # ✅ preserve reading order (VERY IMPORTANT)
+    merged_chunks.sort(
+        key=lambda c: (
+            c.page,
+            c.bbox[1] if c.bbox else 0
+        )
+    )
+
+    return merged_chunks
+
+import numpy as np
+
+def _score_crop(crop):
+    """
+    Score crop based on visual richness
+    Higher = more useful (charts, tables)
+    Lower = blank / whitespace
+    """
+    gray = crop.convert("L")
+    arr = np.array(gray)
+
+    # standard deviation = variation
+    return arr.std()
+
 def _crop_chunk_to_base64(
         pdf_path: Path,
         chunk: Chunk,
         min_crop_size_px: int = _MIN_CROP_SIZE_PX
 ):
-    if chunk.bbox is None:
-        return None
     
     page_img = pdf_to_images(pdf_path, chunk.page-1,dpi=150)
     w,h =page_img.size
 
-    bbox = chunk.bbox
-    x1=int(bbox[0]*w/1000)
-    y1=int(bbox[1]*h/1000)
-    x2=int(bbox[2]*w/1000)
-    y2=int(bbox[3]*h/1000)
+    if chunk.bbox is None:
+        crop = page_img
+    else:
+        x1, y1, x2, y2 = map(int, chunk.bbox)
+        x1 = max(0, min(x1, w))
+        y1 = max(0, min(y1, h))
+        x2 = max(0, min(x2, w))
+        y2 = max(0, min(y2, h))
 
-    crop = page_img.crop((x1,y1,x2,y2))
+        if x2 <= x1 or y2 <= y1:
+            logger.warning(f"Invalid bbox for chunk {chunk.chunk_id}: {chunk.bbox}")
+            return None
+        
+        crop1 = page_img.crop((x1, y1, x2, y2))
+        y1f, y2f = h - y2, h - y1
+        crop2 = page_img.crop((x1, y1f, x2, y2f))
+        try:
+            score1 = _score_crop(crop1)
+            score2 = _score_crop(crop2)
+        except Exception:
+            score1, score2 = 0, 0
+        crop = crop1 if score1 >= score2 else crop2
+
+    # bbox = chunk.bbox
+    # x1=int(bbox[0]*w/1000)
+    # y1=int(bbox[1]*h/1000)
+    # x2=int(bbox[2]*w/1000)
+    # y2=int(bbox[3]*h/1000)
+    
+        # x1 = max(0, min(x1, w))
+        # y1 = max(0, min(y1, h))
+        # x2 = max(0, min(x2, w))
+        # y2 = max(0, min(y2, h))
+
+        # if x2 <= x1 or y2 <= y1:
+        #     logger.warning(f"Invalid bbox for chunk {chunk.chunk_id}: {chunk.bbox}")
+        #     return None
+        
+        # crop = page_img.crop((x1,y1,x2,y2))
+
+        print(f"""
+            DEBUG CROP:
+            Page size: {w}x{h}
+            BBox: {bbox}
+            Crop: ({x1},{y1},{x2},{y2})
+            Width: {x2-x1}, Height: {y2-y1}
+            """)
 
     if crop.size[0] < min_crop_size_px or crop.size[1] < min_crop_size_px:
         logger.debug(f"Crop size {crop.size} is smaller than minimum {min_crop_size_px}px, skipping image extraction.")
@@ -169,7 +286,7 @@ async def _enrich_single_image(
         try:
             b64 = _crop_chunk_to_base64(pdf_path, chunk)
             if not b64:
-                logger.debug(f"Skipping image enrichment for chunk {chunk.id} due to small crop size.")
+                logger.debug(f"Skipping image enrichment for chunk {chunk.chunk_id} due to small crop size.")
                 chunk.text ="[figure]" 
                 return 
 
@@ -205,7 +322,7 @@ async def _enrich_single_image(
             chunk.text= full_text
             chunk.image_base64=b64
 
-            logger.debug(f"Enriched image chunk {chunk.id} with caption: {caption}")
+            logger.debug(f"Enriched image chunk {chunk.chunk_id} with caption: {caption}")
 
         except Exception:
             logger.warning("Image enrichment failed for chunk %s", chunk.chunk_id, exc_info=True)
@@ -252,6 +369,9 @@ async def _enrich_single_table(
             else:
                 table_text = raw
 
+            table_text = re.sub(r"<.*?>", " ", raw)
+            table_text = re.sub(r"\s+", " ", table_text).strip()
+
             response = await client.chat.completions.create(
                 model=model,
                 messages=[
@@ -288,7 +408,7 @@ async def _enrich_single_table(
                     b64 = _crop_chunk_to_base64(pdf_path, chunk)
                     chunk.image_base64 = b64
                 except Exception as e:
-                    logger.error(f"Error cropping image for chunk {chunk.id}: {e}")
+                    logger.error(f"Error cropping image for chunk {chunk.chunk_id}: {e}")
 
 
         except Exception:
@@ -452,6 +572,8 @@ async def enrich_chunk(
     
     if semaphore is None:
         semaphore = asyncio.Semaphore(max_concurrent)
+
+    chunks = _merge_nearby_bboxes(chunks)
     
     tasks = []
     counts : dict[str,int] = defaultdict(int)
@@ -509,77 +631,158 @@ async def enrich_image_chunks(
 if __name__ == "__main__":
     import asyncio
     from pathlib import Path
+    import json
 
-    # --- Mock Chunk class (since yours is imported) ---
-    class Chunk:
-        def __init__(self, chunk_id, modality, text, page=1, bbox=None):
-            self.chunk_id = chunk_id
-            self.modality = modality
-            self.text = text
-            self.page = page
-            self.bbox = bbox
+    from openai import AsyncOpenAI
+    from config import get_settings
 
-            # Outputs
-            self.caption = None
-            self.image_base64 = None
+    settings = get_settings()
+    client = AsyncOpenAI(api_key=settings.openai_api_key.get_secret_value())
 
-        def __repr__(self):
-            return f"Chunk(id={self.chunk_id}, modality={self.modality}, text={self.text[:30]})"
+    pdf_path = Path(r"C:\dev\multi_model_rag\ingestion\test_data\data\data_pdf.pdf")
+    json_path = Path(r"C:\dev\multi_model_rag\ingestion\test_output\data_pdf_elements.json")
+    output_md = Path(r"C:\dev\multi_model_rag\ingestion\test_output\captions.md")
 
-    # --- Mock OpenAI client ---
-    class MockResponse:
-        def __init__(self, content):
-            self.choices = [
-                type("obj", (), {
-                    "message": type("msg", (), {"content": content})
-                })
-            ]
+    semaphore = asyncio.Semaphore(2)
 
-    class MockClient:
-        class chat:
-            class completions:
-                @staticmethod
-                async def create(*args, **kwargs):
-                    # Return dummy response based on prompt type
-                    if "json_object" in str(kwargs):
-                        return MockResponse('{"num_columns":2,"num_rows":2,"markdown_table":"|A|B|\\n|1|2|","summary":"Test table"}')
-                    return MockResponse("Caption: Test caption\nDetail: Test detail")
+    with open(json_path, "r", encoding="utf-8") as f:
+        elements = json.load(f)
 
-    async def main():
-        # --- Create sample chunks ---
-        chunks = [
-            Chunk("1", "image", "image content", bbox=(0, 0, 500, 500)),
-            Chunk("2", "table", "col1 col2\n1 2\n3 4"),
-            Chunk("3", "formula", "E = mc^2"),
-            Chunk("4", "algorithm", "for i in range(n): pass"),
-            Chunk("5", "text", "This is surrounding text")
-        ]
+    chunks = []
+    for i, el in enumerate(elements):
+        label = el.get("labels", "").lower()
+        text = el.get("texts", "")
+        bbox = el.get("bboxes", None)
 
-        # --- Inputs ---
-        pdf_path = Path("dummy.pdf")  # won't be used in mock
-        client = MockClient()
-        semaphore = asyncio.Semaphore(2)
 
-        # --- Run enrichment ---
-        enriched_chunks = await enrich_chunk(
+
+        if any(x in label for x in ["figure", "chart", "image"]):
+            modality = "image"
+        elif label in ["table"]:
+            modality = "table"
+        else:
+            continue  # skip text
+
+        chunk = Chunk(
+            chunk_id=str(i),
+            modality=modality,
+            text=text,
+            page=el.get("page", 1),
+            bbox=bbox,
+            element_types=[label],
+            source_file=str(pdf_path),
+            is_atomic=True
+        )
+
+        chunks.append(chunk)
+
+    print("\n=== DEBUG BEFORE ENRICH ===")
+    for c in chunks[:10]:
+        print("ID:", c.chunk_id, "MOD:", c.modality, "BBOX:", c.bbox)
+
+    print(f"Total chunks created: {len(chunks)}")
+    
+
+    async def run():
+        enriched = await enrich_chunk(
             chunks=chunks,
             pdf_path=pdf_path,
             client=client,
             semaphore=semaphore,
-            model="mock-model"
+            model="gpt-4o"
         )
+        return enriched
 
-        # --- Print results ---
-        print("\n=== FINAL OUTPUT ===")
-        for c in enriched_chunks:
-            print(f"\nID: {c.chunk_id}")
-            print(f"Modality: {c.modality}")
-            print(f"Caption: {c.caption}")
-            print(f"Text: {c.text}")
-            print(f"Image present: {c.image_base64 is not None}")
+    enriched_chunks = asyncio.run(run())
 
-    # --- Run async main ---
-    asyncio.run(main())
+    md_lines = ["# Extracted Captions\n"]
+    for c in enriched_chunks:
+        md_lines.append(f"## Chunk {c.chunk_id} ({c.modality})\n")
+
+        if c.caption:
+            md_lines.append(f"**Caption:** {c.caption}\n")
+
+        if c.text:
+            md_lines.append(f"**Detail:**\n{c.text}\n")
+
+        md_lines.append("---\n")
+
+    with open(output_md, "w", encoding="utf-8") as f:
+        f.write("\n".join(md_lines))
+
+    print(f"\n✅ Captions saved → {output_md}")
+
+
+    # # --- Mock Chunk class (since yours is imported) ---
+    # class Chunk:
+    #     def __init__(self, chunk_id, modality, text, page=1, bbox=None):
+    #         self.chunk_id = chunk_id
+    #         self.modality = modality
+    #         self.text = text
+    #         self.page = page
+    #         self.bbox = bbox
+
+    #         # Outputs
+    #         self.caption = None
+    #         self.image_base64 = None
+
+    #     def __repr__(self):
+    #         return f"Chunk(id={self.chunk_id}, modality={self.modality}, text={self.text[:30]})"
+
+    # # --- Mock OpenAI client ---
+    # class MockResponse:
+    #     def __init__(self, content):
+    #         self.choices = [
+    #             type("obj", (), {
+    #                 "message": type("msg", (), {"content": content})
+    #             })
+    #         ]
+
+    # class MockClient:
+    #     class chat:
+    #         class completions:
+    #             @staticmethod
+    #             async def create(*args, **kwargs):
+    #                 # Return dummy response based on prompt type
+    #                 if "json_object" in str(kwargs):
+    #                     return MockResponse('{"num_columns":2,"num_rows":2,"markdown_table":"|A|B|\\n|1|2|","summary":"Test table"}')
+    #                 return MockResponse("Caption: Test caption\nDetail: Test detail")
+
+    # async def main():
+    #     # --- Create sample chunks ---
+    #     chunks = [
+    #         Chunk("1", "image", "image content", bbox=(0, 0, 500, 500)),
+    #         Chunk("2", "table", "col1 col2\n1 2\n3 4"),
+    #         Chunk("3", "formula", "E = mc^2"),
+    #         Chunk("4", "algorithm", "for i in range(n): pass"),
+    #         Chunk("5", "text", "This is surrounding text")
+    #     ]
+
+    #     # --- Inputs ---
+    #     pdf_path = Path("dummy.pdf")  # won't be used in mock
+    #     client = MockClient()
+    #     semaphore = asyncio.Semaphore(2)
+
+    #     # --- Run enrichment ---
+    #     enriched_chunks = await enrich_chunk(
+    #         chunks=chunks,
+    #         pdf_path=pdf_path,
+    #         client=client,
+    #         semaphore=semaphore,
+    #         model="mock-model"
+    #     )
+
+    #     # --- Print results ---
+    #     print("\n=== FINAL OUTPUT ===")
+    #     for c in enriched_chunks:
+    #         print(f"\nID: {c.chunk_id}")
+    #         print(f"Modality: {c.modality}")
+    #         print(f"Caption: {c.caption}")
+    #         print(f"Text: {c.text}")
+    #         print(f"Image present: {c.image_base64 is not None}")
+
+    # # --- Run async main ---
+    # asyncio.run(main())
 
 
 

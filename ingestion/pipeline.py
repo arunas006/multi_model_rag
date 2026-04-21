@@ -186,6 +186,25 @@ if __name__ == "__main__":
             print("Source:", res.source_file)
             print("Pages:", len(res.pages))
             print("Elements:", res.total_elements)
+
+            all_elements = []
+
+            for page in res.pages:
+                for el in page.elements:
+                    all_elements.append({
+                        "page": page.page_num,
+                        "labels": el.label,
+                        "texts": el.text,
+                        "bboxes": el.bbox,
+                        "scores": el.score,
+                        "reading_orders": el.reading_order,
+                    })
+        base_name = Path(res.source_file).stem
+        json_path = output_dir / f"{base_name}_elements.json"
+
+        with json_path.open("w", encoding="utf-8") as f:
+            import json
+            json.dump(all_elements, f, ensure_ascii=False, indent=4)
     
     except Exception as e:
         logger.error(f"Error during parsing: {e}", exc_info=True)
