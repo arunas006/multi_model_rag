@@ -137,7 +137,7 @@ class JinaReranker(BaseRanker):
                     "text": text,
                     "image":[image_b64]
                     }
-                })
+                )
             else:
                 docments.append({
                     "text": "text",
