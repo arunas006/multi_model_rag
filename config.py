@@ -31,7 +31,7 @@ class Settings(BaseSettings):
     gemini_api_key: SecretStr | None = None
 
      # Qdrant
-    qdrant_url: str = "http://localhost:6333"
+    qdrant_url: str | None = None
     qdrant_api_key: SecretStr | None = None
     qdrant_collection_name: str = "documents"
 
