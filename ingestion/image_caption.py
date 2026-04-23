@@ -196,44 +196,25 @@ def _crop_chunk_to_base64(
     if chunk.bbox is None:
         crop = page_img
     else:
-        x1, y1, x2, y2 = map(int, chunk.bbox)
-        x1 = max(0, min(x1, w))
-        y1 = max(0, min(y1, h))
-        x2 = max(0, min(x2, w))
-        y2 = max(0, min(y2, h))
-
-        if x2 <= x1 or y2 <= y1:
-            logger.warning(f"Invalid bbox for chunk {chunk.chunk_id}: {chunk.bbox}")
-            return None
+        x1, y1, x2, y2 = map(float, chunk.bbox)
         
-        crop1 = page_img.crop((x1, y1, x2, y2))
-        y1f, y2f = h - y2, h - y1
-        crop2 = page_img.crop((x1, y1f, x2, y2f))
-        try:
-            score1 = _score_crop(crop1)
-            score2 = _score_crop(crop2)
-        except Exception:
-            score1, score2 = 0, 0
-        crop = crop1 if score1 >= score2 else crop2
-
-    # bbox = chunk.bbox
-    # x1=int(bbox[0]*w/1000)
-    # y1=int(bbox[1]*h/1000)
-    # x2=int(bbox[2]*w/1000)
-    # y2=int(bbox[3]*h/1000)
+    x1=int(x1*w/1000)
+    y1=int(y1*h/1000)
+    x2=int(x2*w/1000)
+    y2=int(y2*h/1000)
     
-        # x1 = max(0, min(x1, w))
-        # y1 = max(0, min(y1, h))
-        # x2 = max(0, min(x2, w))
-        # y2 = max(0, min(y2, h))
+    x1 = max(0, min(x1, w))
+    y1 = max(0, min(y1, h))
+    x2 = max(0, min(x2, w))
+    y2 = max(0, min(y2, h))
 
-        # if x2 <= x1 or y2 <= y1:
-        #     logger.warning(f"Invalid bbox for chunk {chunk.chunk_id}: {chunk.bbox}")
-        #     return None
+    if x2 <= x1 or y2 <= y1:
+        logger.warning(f"Invalid bbox for chunk {chunk.chunk_id}: {chunk.bbox}")
+        return None
         
-        # crop = page_img.crop((x1,y1,x2,y2))
+    crop = page_img.crop((x1,y1,x2,y2))
 
-        print(f"""
+    print(f"""
             DEBUG CROP:
             Page size: {w}x{h}
             BBox: {bbox}
@@ -627,6 +608,75 @@ async def enrich_image_chunks(
     return await enrich_chunk(
         chunks, pdf_path=pdf_path, client=client, max_concurrent=max_concurrent
     )
+
+from PIL import ImageDraw
+from ingestion.pdf_utils import pdf_to_images
+
+
+def save_page_with_all_bboxes(chunks, pdf_path, debug_dir):
+    debug_dir.mkdir(exist_ok=True)
+
+    COLOR_MAP = {
+        "image": "red",
+        "table": "blue",
+        "chart": "green",
+    }
+
+    pages = {}
+    for c in chunks:
+        if c.bbox is None:
+            continue
+        pages.setdefault(c.page, []).append(c)
+
+    for page_num, page_chunks in pages.items():
+        page_img = pdf_to_images(pdf_path, page_num - 1, dpi=150)
+        draw = ImageDraw.Draw(page_img)
+
+        w, h = page_img.size
+
+        for c in page_chunks:
+            x1, y1, x2, y2 = map(float, c.bbox)
+
+            # ✅ NORMALIZED SCALE
+            x1 = int(x1 * w / 1000)
+            x2 = int(x2 * w / 1000)
+            y1 = int(y1 * h / 1000)
+            y2 = int(y2 * h / 1000)
+
+            color = COLOR_MAP.get(c.modality, "yellow")
+
+            draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
+            draw.text((x1, max(0, y1 - 12)), f"{c.modality}-{c.chunk_id}", fill=color)
+
+        file_path = debug_dir / f"page_{page_num}_debug.png"
+        page_img.save(file_path)
+
+        print(f"Saved → {file_path}")
+
+def save_cropped_chunk_image(chunk: Chunk, pdf_path: Path, output_dir: Path):
+
+    crop_dir = output_dir / "crops_from_func"
+    crop_dir.mkdir(parents=True,exist_ok=True)
+
+    for c in chunks:
+        if c.bbox is None:
+            continue
+
+        try:
+            b64 = _crop_chunk_to_base64(pdf_path, c)
+            if not b64:
+                print(f"Skipping chunk {c.chunk_id} (empty crop)")
+                continue
+            img_bytes = base64.b64decode(b64)
+            file_path = crop_dir / f"chunk_{c.chunk_id}_{c.modality}_p{c.page}.png"
+
+            with open(file_path, "wb") as f:
+                f.write(img_bytes)
+
+            print(f"Saved crop → {file_path}")
+
+        except Exception as e:
+            print(f"Error for chunk {c.chunk_id}: {e}")
    
 if __name__ == "__main__":
     import asyncio
@@ -681,7 +731,13 @@ if __name__ == "__main__":
         print("ID:", c.chunk_id, "MOD:", c.modality, "BBOX:", c.bbox)
 
     print(f"Total chunks created: {len(chunks)}")
-    
+
+    # DEBUG_DIR = Path(r"C:\dev\multi_model_rag\ingestion\test_output\debug_pages")
+
+    # # print("\n=== DRAWING ALL BBOXES (TABLE / IMAGE / CHART) ===")
+
+    # # save_page_with_all_bboxes(chunks, pdf_path, DEBUG_DIR)
+    # save_cropped_chunk_image(chunks, pdf_path, DEBUG_DIR)
 
     async def run():
         enriched = await enrich_chunk(
@@ -712,77 +768,6 @@ if __name__ == "__main__":
 
     print(f"\n✅ Captions saved → {output_md}")
 
-
-    # # --- Mock Chunk class (since yours is imported) ---
-    # class Chunk:
-    #     def __init__(self, chunk_id, modality, text, page=1, bbox=None):
-    #         self.chunk_id = chunk_id
-    #         self.modality = modality
-    #         self.text = text
-    #         self.page = page
-    #         self.bbox = bbox
-
-    #         # Outputs
-    #         self.caption = None
-    #         self.image_base64 = None
-
-    #     def __repr__(self):
-    #         return f"Chunk(id={self.chunk_id}, modality={self.modality}, text={self.text[:30]})"
-
-    # # --- Mock OpenAI client ---
-    # class MockResponse:
-    #     def __init__(self, content):
-    #         self.choices = [
-    #             type("obj", (), {
-    #                 "message": type("msg", (), {"content": content})
-    #             })
-    #         ]
-
-    # class MockClient:
-    #     class chat:
-    #         class completions:
-    #             @staticmethod
-    #             async def create(*args, **kwargs):
-    #                 # Return dummy response based on prompt type
-    #                 if "json_object" in str(kwargs):
-    #                     return MockResponse('{"num_columns":2,"num_rows":2,"markdown_table":"|A|B|\\n|1|2|","summary":"Test table"}')
-    #                 return MockResponse("Caption: Test caption\nDetail: Test detail")
-
-    # async def main():
-    #     # --- Create sample chunks ---
-    #     chunks = [
-    #         Chunk("1", "image", "image content", bbox=(0, 0, 500, 500)),
-    #         Chunk("2", "table", "col1 col2\n1 2\n3 4"),
-    #         Chunk("3", "formula", "E = mc^2"),
-    #         Chunk("4", "algorithm", "for i in range(n): pass"),
-    #         Chunk("5", "text", "This is surrounding text")
-    #     ]
-
-    #     # --- Inputs ---
-    #     pdf_path = Path("dummy.pdf")  # won't be used in mock
-    #     client = MockClient()
-    #     semaphore = asyncio.Semaphore(2)
-
-    #     # --- Run enrichment ---
-    #     enriched_chunks = await enrich_chunk(
-    #         chunks=chunks,
-    #         pdf_path=pdf_path,
-    #         client=client,
-    #         semaphore=semaphore,
-    #         model="mock-model"
-    #     )
-
-    #     # --- Print results ---
-    #     print("\n=== FINAL OUTPUT ===")
-    #     for c in enriched_chunks:
-    #         print(f"\nID: {c.chunk_id}")
-    #         print(f"Modality: {c.modality}")
-    #         print(f"Caption: {c.caption}")
-    #         print(f"Text: {c.text}")
-    #         print(f"Image present: {c.image_base64 is not None}")
-
-    # # --- Run async main ---
-    # asyncio.run(main())
 
 
 
