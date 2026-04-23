@@ -85,6 +85,17 @@ class OpenAIEmbedder(BaseEmbedder):
             model=self.model,
             dimensions=self.dimensions
         )
+
+_PROVIDERS: dict[str, type[BaseEmbedder]] = {"openai": OpenAIEmbedder}
+
+def get_embedder(settings: Settings) -> BaseEmbedder:
+    provider = settings.embedding_provider.lower()
+    if provider not in _PROVIDERS:
+        raise ValueError(
+            f"Unknown embedding provider: {provider!r}. Choose from: {list(_PROVIDERS)}"
+        )
+    logger.info("Initialising embedding provider: %s", provider)
+    return _PROVIDERS[provider](settings)
     
 async def embed_chunks(chunks: list[Chunk], 
                        embedder: BaseEmbedder,

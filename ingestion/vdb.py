@@ -28,8 +28,8 @@ class QdrantDocumentStore:
 
     def __init__(self,settings: Settings):
         api_key = (
-            settings.QDRANT_API_KEY.get_secret_value()
-            if settings.QDRANT_API_KEY
+            settings.qdrant_api_key.get_secret_value()
+            if settings.qdrant_api_key
             else None
         )
         self.client = AsyncQdrantClient(
@@ -74,12 +74,12 @@ class QdrantDocumentStore:
 
     async def delete_collection(self, collection_name: str) -> None:
 
-        response = await self._client.get_collections()
+        response = await self.client.get_collections()
         existing = {c.name for c in response.collections}
         if collection_name not in existing:
             logger.warning("Collection '%s' does not exist.", collection_name)
             return False
-        await self._client.delete_collection(collection_name)
+        await self.client.delete_collection(collection_name)
         logger.info("Deleted collection '%s'", collection_name)
         return True
     
@@ -161,7 +161,6 @@ class QdrantDocumentStore:
         )
         return [point.payload for point in result.points]
 
-
 if __name__ == "__main__":
 
     import asyncio
@@ -206,4 +205,4 @@ if __name__ == "__main__":
 
         print("✅ Search successful:", result)
 
-asyncio.run(full_test())
+    asyncio.run(full_test())
