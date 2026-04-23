@@ -214,13 +214,13 @@ def _crop_chunk_to_base64(
         
     crop = page_img.crop((x1,y1,x2,y2))
 
-    print(f"""
-            DEBUG CROP:
-            Page size: {w}x{h}
-            BBox: {bbox}
-            Crop: ({x1},{y1},{x2},{y2})
-            Width: {x2-x1}, Height: {y2-y1}
-            """)
+    # print(f"""
+    #         DEBUG CROP:
+    #         Page size: {w}x{h}
+    #         BBox: {bbox}
+    #         Crop: ({x1},{y1},{x2},{y2})
+    #         Width: {x2-x1}, Height: {y2-y1}
+    #         """)
 
     if crop.size[0] < min_crop_size_px or crop.size[1] < min_crop_size_px:
         logger.debug(f"Crop size {crop.size} is smaller than minimum {min_crop_size_px}px, skipping image extraction.")

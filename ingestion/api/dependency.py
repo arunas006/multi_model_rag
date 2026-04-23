@@ -19,11 +19,11 @@ def get_store() -> QdrantDocumentStore:
     return QdrantDocumentStore(settings)    
 
 @lru_cache
-def get_reranker() -> BaseRanker:
+def get_reranker_dep() -> BaseRanker:
     settings = Settings()
     return get_reranker(settings)
 
 @lru_cache
-def get_embedder() -> BaseEmbedder:
+def get_embedder_dep() -> BaseEmbedder:
     settings = Settings()
     return get_embedder(settings)

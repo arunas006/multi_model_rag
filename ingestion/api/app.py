@@ -8,6 +8,7 @@ from loguru import logger
 
 from ingestion.api.middleware import LoggingMiddleware
 from ingestion.api.route.health import router as health_router
+from ingestion.api.route.ingest import router as ingest_router
 
 from config import get_settings
 from utils.logging_config import setup_logging
@@ -36,6 +37,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(LoggingMiddleware)
     app.include_router(health_router, tags=["health"])
+    app.include_router(ingest_router, prefix="/ingest", tags=["ingest"])
 
 
     return app

@@ -8,7 +8,7 @@ from qdrant_client.models import (
     Distance,
     Fusion,
     FusionQuery,
-    HnswConfig,
+    HnswConfigDiff,
     PointStruct,
     Prefetch,
     SparseIndexParams,
@@ -58,9 +58,9 @@ class QdrantDocumentStore:
                 "text_dense": VectorParams(
                     size=self.settings.embedding_dimensions,
                     distance=Distance.COSINE,
-                    hnsw_config=HnswConfig(
+                    hnsw_config=HnswConfigDiff(
                         m=16,
-                        ef_construction=200,
+                        ef_construct=200,
                         full_scan_threshold=1000
                     )
                 )
@@ -96,7 +96,7 @@ class QdrantDocumentStore:
         for chunk,dense,sparse in zip(chunks,dense_embedding,sparse_embedding,strict=False):
             payload = {
                 "text": chunk.text,
-                "chunk_id": chunk.id,
+                "chunk_id": chunk.chunk_id,
                 "soucre_file": chunk.source_file,
                 "page": chunk.page,
                 "element_types": chunk.element_types,
