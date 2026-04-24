@@ -113,7 +113,7 @@ async def _run_ingest(
     semaphore = asyncio.Semaphore(5)
     async def embed_chunk(batch):
         async with semaphore:
-            return await embed_chunks(chunks, embedder, settings)
+            return await embed_chunks(batch,embedder, settings)
     
     batches = [
         chunks[i:i+32] for i in range(0, len(chunks), 32)   

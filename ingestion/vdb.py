@@ -35,7 +35,7 @@ class QdrantDocumentStore:
         self.client = AsyncQdrantClient(
             url=settings.qdrant_url,
             api_key=api_key,
-            prefer_grpc=True
+            prefer_grpc=False
         )
         self.collection_name = settings.qdrant_collection_name
         self.settings = settings
@@ -47,10 +47,17 @@ class QdrantDocumentStore:
         if self.collection_name in existing:
             if not overwrite:
                 logger.info(f"Collection '{self.collection_name}' already exists. Skipping creation.")
+                await self.client.create_payload_index(
+                collection_name=self.collection_name,
+                field_name="modality",
+                field_schema="keyword",
+                wait=True
+                )
                 return
             logger.info(f"Collection '{self.collection_name}' already exists. Deleting for overwrite.")
             await self.client.delete_collection(collection_name=self.collection_name)
 
+        
         logger.info(f"Creating collection '{self.collection_name}' with vector and sparse index.")
         await self.client.create_collection(
             collection_name=self.collection_name,
@@ -72,6 +79,13 @@ class QdrantDocumentStore:
             },
         )
 
+        await self.client.create_payload_index(
+        collection_name=self.collection_name,
+        field_name="modality",
+        field_schema="keyword",
+        wait=True
+        )
+
     async def delete_collection(self, collection_name: str) -> None:
 
         response = await self.client.get_collections()
@@ -89,6 +103,11 @@ class QdrantDocumentStore:
                             sparse_embedding: list[SparseVector],
                             batch_size: int =64) -> int:
         
+        print("FINAL CHECK →")
+        print("Chunks:", len(chunks))
+        print("Dense:", len(dense_embedding))
+        print("Sparse:", len(sparse_embedding))
+        
         if len(chunks) != len(dense_embedding) or len(chunks) != len(sparse_embedding):
             raise ValueError("Length of chunks, dense_embedding, and sparse_embedding must be the same.")
         
@@ -97,7 +116,7 @@ class QdrantDocumentStore:
             payload = {
                 "text": chunk.text,
                 "chunk_id": chunk.chunk_id,
-                "soucre_file": chunk.source_file,
+                "source_file": chunk.source_file,
                 "page": chunk.page,
                 "element_types": chunk.element_types,
                 "bbox": chunk.bbox,
@@ -156,7 +175,7 @@ class QdrantDocumentStore:
             query = FusionQuery(fusion=Fusion.RRF),
             limit=top_k,
             with_payload=True,
-            filter=query_filter
+            query_filter=query_filter
         
         )
         return [point.payload for point in result.points]
@@ -168,41 +187,77 @@ if __name__ == "__main__":
     settings = get_settings()
     from qdrant_client.models import VectorParams, Distance
 
-    async def full_test():
+    # async def full_test():
+    #     client = AsyncQdrantClient(
+    #         url=settings.qdrant_url,
+    #         api_key=settings.qdrant_api_key.get_secret_value(),
+    #         prefer_grpc=True
+    #     )
+
+
+
+    async def debug():
         client = AsyncQdrantClient(
             url=settings.qdrant_url,
             api_key=settings.qdrant_api_key.get_secret_value(),
             prefer_grpc=True
         )
+        
+
+        collection = "documents"
+
+        info = await client.get_collection(collection_name=collection)
+
+        print("\n=== COLLECTION INFO ===")
+        print("Collection:", collection)
+
+        print("\n=== PAYLOAD SCHEMA ===")
+        print(info.payload_schema)
+
+        # print("Creating index...")
+
+        # await client.create_payload_index(
+        #     collection_name=collection,
+        #     field_name="modality",
+        #     field_schema="keyword",
+        #     wait=True
+        # )
+
+        # info = await client.get_collection(collection)
+
+        # print("SCHEMA:", info.payload_schema)
+
+
+    asyncio.run(debug())
 
         # Create test collection
-        await client.create_collection(
-            collection_name="test_connection",
-            vectors_config=VectorParams(size=4, distance=Distance.COSINE)
-        )
+    #     # await client.create_collection(
+    #     #     collection_name="test_connection",
+    #     #     vectors_config=VectorParams(size=4, distance=Distance.COSINE)
+    #     # )
 
-        print("✅ Collection created")
+    #     # print("✅ Collection created")
 
-        # Insert point
-        await client.upsert(
-            collection_name="test_connection",
-            points=[
-                PointStruct(
-                    id = str(uuid.uuid5(uuid.NAMESPACE_DNS, "my_id")),
-                    vector=[0.1, 0.2, 0.3, 0.4],
-                    payload={"test": "ok"}
-                )
-            ]
-        )
-        print("✅ Insert successful")
+    #     # # Insert point
+    #     # await client.upsert(
+    #     #     collection_name="test_connection",
+    #     #     points=[
+    #     #         PointStruct(
+    #     #             id = str(uuid.uuid5(uuid.NAMESPACE_DNS, "my_id")),
+    #     #             vector=[0.1, 0.2, 0.3, 0.4],
+    #     #             payload={"test": "ok"}
+    #     #         )
+    #     #     ]
+    #     # )
+    #     # print("✅ Insert successful")
 
-        # Search
-        result = await client.query_points(
-                collection_name="test_connection",
-                query=[0.1, 0.2, 0.3, 0.4],
-                limit=1
-            )
+    #     # Search
+    #     result = await client.query_points(
+    #             collection_name="test_connection",
+    #             query=[0.1, 0.2, 0.3, 0.4],
+    #             limit=1
+    #         )
 
-        print("✅ Search successful:", result)
+    #     print("✅ Search successful:", result)
 
-    asyncio.run(full_test())
+    # asyncio.run(full_test())

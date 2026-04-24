@@ -13,13 +13,13 @@ logger = logging.getLogger(__name__)
 _TOKEN_WORD_RATIO = 1.3
 
 ATOMIC_LABELS: frozenset[str] = frozenset(
-    {"table", "formula", "inline_formula", "algorithm", "image", "figure"}
+    {"table", "formula", "inline_formula", "algorithm", "image", "figure","chart"}
 )
 TITLE_LABELS: frozenset[str] = frozenset(
     {"document_title", "paragraph_title", "figure_title"}
 )
 # Modality classification sets
-_IMAGE_TYPES: frozenset[str] = frozenset({"image", "figure"})
+_IMAGE_TYPES: frozenset[str] = frozenset({"image", "figure", "chart"})
 _TABLE_TYPES: frozenset[str] = frozenset({"table"})
 _FORMULA_TYPES: frozenset[str] = frozenset({"formula", "inline_formula"})
 _ALGORITHM_TYPES: frozenset[str] = frozenset({"algorithm"})
