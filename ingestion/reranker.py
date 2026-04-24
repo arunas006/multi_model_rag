@@ -140,7 +140,7 @@ class JinaReranker(BaseRanker):
                 )
             else:
                 docments.append({
-                    "text": "text",
+                    "text": text,
                 })
         
         payload = {
@@ -165,6 +165,12 @@ class JinaReranker(BaseRanker):
             idx = item["index"]
             score = item["relevance_score"]
             reranked.append({**candidates[idx], "rerank_score": score})
+
+        reranked = sorted(
+                            reranked,
+                            key=lambda x: x.get("rerank_score", 0),
+                            reverse=True
+                        )[:top_n]
 
         return reranked
     

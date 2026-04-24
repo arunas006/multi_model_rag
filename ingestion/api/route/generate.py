@@ -74,9 +74,12 @@ async def generate(req: GenerateRequest) -> GenerateResponse:
     
     total_candidates = len(candidates)
 
+    candidates = sorted(candidates, key=lambda x: x.get("score", 0), reverse=True)
+
     if req.rerank and candidates:
         try:
             candidates = await reranker.rerank(req.query, candidates, top_n=top_n)
+            candidates = sorted(candidates, key=lambda x: x.get("rerank_score", 0), reverse=True)[:top_n]
         except Exception as exc:
             logger.exception("Reranking failed: {}", exc)
             raise HTTPException(status_code=502, detail=f"Reranking failed: {exc}") from exc

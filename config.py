@@ -57,6 +57,8 @@ class Settings(BaseSettings):
     # Logging
     log_json: bool = False
 
+    META_FILE : str = "data/source_files.json"
+
     @model_validator(mode="after")
     def _validate_backend(self) -> Settings:
         if self.parser_backend == "cloud" :

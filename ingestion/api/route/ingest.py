@@ -21,7 +21,25 @@ from ingestion.pipeline import DocumentParser
 
 _CHUNKS_OUTPUT_DIR = Path("data/chunks")
 
+settings = get_settings()
+META_FILE = Path(settings.META_FILE)
+
 router = APIRouter()
+
+def update_source_metadata(chunks):
+    new_sources = {c.source_file for c in chunks if c.source_file}
+
+    if META_FILE.exists():
+        try:
+            existing = set(json.loads(META_FILE.read_text()))
+        except:
+            existing = set()
+    else:
+        existing = set()
+
+    updated = existing.union(new_sources)
+
+    META_FILE.write_text(json.dumps(sorted(updated), indent=2))
 
 def _save_chunks_to_disk(
     chunks: list[Chunk],
@@ -109,6 +127,8 @@ async def _run_ingest(
             semaphore = asyncio.Semaphore(3)
             
         )
+
+    update_source_metadata(chunks)
 
     semaphore = asyncio.Semaphore(5)
     async def embed_chunk(batch):

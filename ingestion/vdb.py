@@ -159,7 +159,7 @@ class QdrantDocumentStore:
             query_filter = Filter(
                 must=[
                     FieldCondition(
-                        key="modality",
+                        key="source_file",
                         match=MatchValue(
                             value=filter_modality
                         )
@@ -218,7 +218,7 @@ if __name__ == "__main__":
 
         # await client.create_payload_index(
         #     collection_name=collection,
-        #     field_name="modality",
+        #     field_name="source_file",
         #     field_schema="keyword",
         #     wait=True
         # )
