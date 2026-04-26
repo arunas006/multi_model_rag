@@ -594,7 +594,7 @@ async def enrich_chunk(
     logger.info(
         "Enriched %d image / %d table / %d formula / %d algorithm chunks from %s",
         counts["image"], counts["table"], counts["formula"], counts["algorithm"],
-        pdf_path.name
+        pdf_path.name if pdf_path else "parsed_json"
     )
     return chunks
 

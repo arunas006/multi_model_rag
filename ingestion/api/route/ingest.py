@@ -18,6 +18,7 @@ from config import get_settings
 from ingestion.embedding import embed_chunks
 from ingestion.image_caption import enrich_chunk
 from ingestion.pipeline import DocumentParser
+from ingestion.pipeline import ParseElement
 
 _CHUNKS_OUTPUT_DIR = Path("data/chunks")
 
@@ -80,6 +81,7 @@ def _save_chunks_to_disk(
 
 async def _run_ingest(
         pdf_path:Path,
+        parsed_file_path:Path,
         collection_override: str | None,
         overwrite:bool,
         max_chunk_tokens :int,
@@ -92,34 +94,59 @@ async def _run_ingest(
     embedder = get_embedder_dep()
     store = get_store()
 
-    source_name = display_name or pdf_path.name
+    source_name = display_name or (pdf_path.name if pdf_path else parsed_file_path.name)
 
     if collection_override:
         store.collection_name = collection_override
     collection=store.collection_name
 
     t0 = time.perf_counter()
-    
-    try:
-        parser = DocumentParser()
-        loop = asyncio.get_running_loop()
-        parse_result = await loop.run_in_executor(None, parser.parse, pdf_path)
-    except FileNotFoundError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except Exception as exc:
-        logger.exception("Parsing failed for {}: {}", source_name, exc)
-        raise HTTPException(status_code=500, detail=f"Parsing failed: {exc}") from exc
+
+    if parsed_file_path:
+    # Load parsed JSON
+        with open(parsed_file_path) as f:
+            parsed_json = json.load(f)
+
+        logger.info("Loaded parsed JSON from {}", parsed_file_path)
+        pages_data = []
+        for p in parsed_json["pages"]:
+            elements = [
+                ParseElement(
+                    label=el["label"],
+                    text=el["text"],
+                    bbox=el["bbox"],
+                    score=el.get("score", 1.0),
+                    reading_order=el["reading_order"],
+                )
+                for el in p["elements"]
+            ]
+
+            pages_data.append((p["page_num"], elements))
+         
+    else:
+        if not pdf_path:
+            raise HTTPException(status_code=400, detail="file_path required if parsed_file not provided")
+        try:
+            parser = DocumentParser()
+            loop = asyncio.get_running_loop()
+            parse_result = await loop.run_in_executor(None, parser.parse, pdf_path)
+            pages_data = [(p.page_num, p.elements) for p in parse_result.pages]
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except Exception as exc:
+            logger.exception("Parsing failed for {}: {}", source_name, exc)
+            raise HTTPException(status_code=500, detail=f"Parsing failed: {exc}") from exc
     
     chunks = await asyncio.to_thread(
         document_aware_chunk,
-        [(p.page_num, p.elements) for p in parse_result.pages],
+        pages_data,
         source_name,    
         max_chunk_tokens
     )
 
     logger.info("Chunked {} → {} chunks", source_name, len(chunks))
 
-    if caption and settings.image_caption_enabled:
+    if caption and settings.image_caption_enabled and pdf_path:
         chunks = await enrich_chunk(
             chunks,
             pdf_path=pdf_path,
@@ -172,7 +199,7 @@ _SUPPORTED_EXTENSIONS: frozenset[str] = frozenset({".pdf", ".png", ".jpg", ".jpe
 
 @router.post("/file", response_model=IngestResponse, summary="Ingest document via file upload")
 async def ingest_file(
-    file: UploadFile = File(..., description="Document file to ingest (PDF or image)."),
+    file: UploadFile | None = File(..., description="Document file to ingest (PDF or image)."),
     collection: str | None = Form(None, description="Override collection name. Leave blank to use the default from QDRANT_COLLECTION_NAME env var.", example=None),
     overwrite: bool = Form(False, description="Recreate collection before ingesting."),
     max_chunk_tokens: int = Form(512, ge=64, le=4096, description="Max tokens per chunk."),
@@ -191,7 +218,8 @@ async def ingest_file(
 
     try:
         return await _run_ingest(
-            tmp_path, collection, overwrite, max_chunk_tokens, caption,
+            pdf_path=tmp_path,parsed_file_path=None, collection_override=collection,
+            overwrite=overwrite,max_chunk_tokens=max_chunk_tokens, caption=caption,
             display_name=file.filename,
         )
     finally:
@@ -200,10 +228,33 @@ async def ingest_file(
 @router.post("", response_model=IngestResponse, summary="Ingest document by file path")
 async def ingest_by_path(req: IngestRequest) -> IngestResponse:
     """Ingest a document referenced by its local file path."""
-    file_path = Path(req.file_path)
-    if not file_path.exists():
-        raise HTTPException(status_code=404, detail=f"File not found: {file_path}")
-    return await _run_ingest(file_path, req.collection, req.overwrite, req.max_chunk_tokens, req.caption)
+    file_path = Path(req.file_path) if req.file_path else None
+    parsed_file = Path(req.parsed_file) if req.parsed_file else None
+
+    if not file_path and not parsed_file:
+        raise HTTPException(
+            status_code=400,
+            detail="Either file_path or parsed_file must be provided"
+        )
+    if file_path and not file_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"File not found: {file_path}"
+        )
+    
+    if parsed_file and not parsed_file.exists():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Parsed file not found: {parsed_file}"
+        )
+ 
+    return await _run_ingest(
+        pdf_path=file_path,
+        parsed_file_path=parsed_file,
+        collection_override=req.collection,
+        overwrite=req.overwrite,
+        max_chunk_tokens=req.max_chunk_tokens,
+        caption=req.caption)
 
    
   

@@ -23,7 +23,8 @@ class SearchRequest(BaseModel):
 class IngestRequest(BaseModel):
     """Request body for POST /ingest (JSON path-based variant)."""
 
-    file_path: str = Field(..., description="Absolute or relative path to the document file (PDF or image).")
+    file_path: str | None = Field(..., description="Absolute or relative path to the document file (PDF or image). if not provided, we need to check parsed_file")
+    parsed_file: str | None = Field(None,description="Path to pre-parsed JSON (from /parse).")
     collection: str | None = Field(None, description="Override collection name from settings.")
     overwrite: bool = Field(False, description="If True, recreate the collection before ingesting.")
     max_chunk_tokens: int = Field(512, ge=64, le=4096, description="Max tokens per text chunk.")
@@ -114,3 +115,19 @@ class DeleteCollectionResponse(BaseModel):
     collection: str
     deleted: bool
     message: str
+
+class ParseRequest(BaseModel):
+    """Request body for POST /parse (path-based)."""
+
+    file_path: str = Field(..., description="Path to PDF or image file.")
+
+class ParseResponse(BaseModel):
+    """Response body for POST /parse."""
+
+    source_file: str
+    pages: int
+    total_elements: int
+    latency_ms: float
+    full_markdown: str | None = None
+    parsed_file: str
+    source_file_path: str

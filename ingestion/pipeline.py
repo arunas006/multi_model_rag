@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import List,Any,Union
 from PIL import Image
 from tqdm import tqdm
+import json
 
 from config import Settings, get_settings
 from ingestion.pdf_utils import pdf_to_images,count_pdf_pages
@@ -77,8 +78,45 @@ class ParseResult:
             full_markdown=full_markdown
         )
 
-    def save(self,output_dir:Path) -> None:
-        save_to_json(self,output_dir)   
+    def save(self, output_dir: Path, file_name: str | None = None) -> None:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # ✅ FIX 1: use self (NOT self.result)
+        base_name = Path(file_name or self.source_file).stem
+
+        json_path = output_dir / f"{base_name}.json"
+        md_path = output_dir / f"{base_name}.md"
+
+        pages_data = []
+        for page in self.pages:   # ✅ FIX 2: self.pages
+            page_dict = {
+                "page_num": page.page_num,
+                "elements": [
+                    {
+                        "label": el.label,
+                        "text": el.text,
+                        "bbox": el.bbox,
+                        "score": el.score,
+                        "reading_order": el.reading_order,
+                    }
+                    for el in page.elements
+                ],
+                "markdown": page.markdown,
+            }
+            pages_data.append(page_dict)
+
+        # ✅ FIX 3: include pages_data
+        json_data = {
+            "source_file": file_name or self.source_file,
+            "total_elements": self.total_elements,
+            "full_markdown": self.full_markdown,
+            "pages": pages_data,
+        }
+
+        # Save JSON
+        with open(json_path, "w", encoding="utf-8") as f:
+            json.dump(json_data, f, ensure_ascii=False, indent=2)
+           
 
 class DocumentParser:
 
@@ -164,7 +202,7 @@ class DocumentParser:
         for fp in tqdm(file_paths, desc="Parsing documents", unit="file"):
             try:
                 result = self.parse(fp)
-                result.save(output_dir)
+                # result.save(output_dir)
                 results.append(result)
             except Exception as e:
                 logger.error(f"Error parsing {fp}: {e}", exc_info=True)
