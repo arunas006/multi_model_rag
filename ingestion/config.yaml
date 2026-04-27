@@ -3,12 +3,12 @@ pipeline:
     enabled: false          # Disable Z.AI cloud API
 
   ocr_api:
-    api_host: localhost
+    api_host: ollama #localhost
     api_port: 11434
     api_path: /api/generate   # Ollama's native endpoint (NOT the OpenAI-compat one)
     model: glm-ocr:latest     # Must match what you pulled
     api_mode: ollama_generate  # Essential — prevents 502 errors
-
+    timeout: 1200 
   enable_layout: true         # PP-DocLayout-V3 layout detection
                               # Requires: uv pip install "glmocr[layout]"
 

@@ -1,0 +1,42 @@
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+.env/
+.venv/
+
+# Git
+.git/
+.gitignore
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local data (IMPORTANT)
+data/
+output/
+
+# HuggingFace / model cache
+.cache/
+huggingface_cache/
+*.bin
+*.pt
+
+# Docker
+docker-compose*.yml
+
+# IDE
+.vscode/
+.idea/
+
+# Test / temp
+tests/
+tmp/

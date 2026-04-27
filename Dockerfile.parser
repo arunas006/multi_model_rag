@@ -1,0 +1,34 @@
+# ---- Base image ----
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# ---- System dependencies (OCR + PDF support) ----
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 libglib2.0-0 curl && rm -rf /var/lib/apt/lists/*
+
+# ---- Install uv ----
+RUN pip install --no-cache-dir uv
+
+RUN uv pip install --system --no-cache \
+    torch torchvision \
+    --extra-index-url https://download.pytorch.org/whl/cpu
+
+COPY pyproject.toml .
+RUN uv pip install --system --no-cache -e ".[layout]"
+
+
+# ---- Copy project files ----
+COPY ingestion /app/ingestion
+COPY config.py /app/
+COPY utils /app/utils
+
+# ---- HuggingFace cache (GLM OCR models) ----
+ENV HF_HOME=/root/.cache/huggingface
+ENV PYTHONUNBUFFERED=1
+ENV PYTHONDONTWRITEBYTECODE=1
+
+# ---- Run parser service ----
+CMD ["uvicorn", "ingestion.api.parser_app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+
