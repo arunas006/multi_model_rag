@@ -18,6 +18,7 @@ services:
       - ./data:/app/data
       - ./output:/app/output
       - huggingface_cache:/root/.cache/huggingface
+      - ~/.aws:/root/.aws
 
     depends_on:
       - ollama

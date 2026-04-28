@@ -13,6 +13,13 @@ class Settings(BaseSettings):
                                       env_file_encoding="utf-8",
                                       case_sensitive=False)
 
+    # Storage
+    storage_backend: str = "local"   # "local" | "s3"
+    s3_bucket_name: str | None = None
+    s3_region: str = "ap-south-1"
+    s3_prefix: str = "rag-app"   # optional folder prefix
+
+
     #Backend Parser
     parser_backend: str = "ollama"  # "cloud" | "ollama"
     z_ai_api_key: SecretStr | None = None
@@ -69,7 +76,11 @@ class Settings(BaseSettings):
                 self.config_yaml_path = "./ingestion/config.yaml"
         else:
             raise ValueError("parser_backend must be either 'cloud' or 'ollama'")
-        return self
+        
+        if self.storage_backend == "s3":
+            if not self.s3_bucket_name:
+                raise ValueError("s3_bucket_name must be set when storage_backend='s3'")
+            return self
     
 _settings : Settings | None = None
 

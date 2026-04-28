@@ -11,12 +11,17 @@ from loguru import logger
 
 from ingestion.pipeline import DocumentParser
 from ingestion.api.schema import ParseResponse, ParseRequest
+from ingestion.storage import Storage
+from config import get_settings
 
 router = APIRouter()
 
 _SUPPORTED_EXTENSIONS: frozenset[str] = frozenset(
     {".pdf", ".png", ".jpg", ".jpeg", ".tiff", ".bmp"}
 )
+
+settings = get_settings()
+storage = Storage()
 
 output_dir = Path("data/parsed")
 output_dir.mkdir(parents=True, exist_ok=True)
@@ -40,8 +45,15 @@ async def _run_parse(file_path: Path, display_name: str | None = None) -> ParseR
 
     latency_ms = (time.perf_counter() - t0) * 1000
     base_name = Path(display_name or result.source_file).stem
+
     result.save(output_dir, file_name=base_name)
     json_path = output_dir / f"{base_name}.json"
+
+    if settings.storage_backend == "s3":
+        parsed_key = f"{settings.s3_prefix}/parsed/{json_path.name}"
+        parsed_file_path = storage.upload_json(str(json_path), parsed_key)
+    else:
+        parsed_file_path = str(json_path)
 
     return ParseResponse(
         source_file=display_name or result.source_file,
@@ -49,7 +61,7 @@ async def _run_parse(file_path: Path, display_name: str | None = None) -> ParseR
         total_elements=result.total_elements,
         latency_ms=round(latency_ms, 2),
         full_markdown=result.full_markdown,
-        parsed_file=str(json_path),
+        parsed_file=parsed_file_path,
         source_file_path=str(file_path)
     )
 
@@ -69,12 +81,23 @@ async def parse_file(file: UploadFile = File(...)) -> ParseResponse:
     base_name = Path(file.filename).stem
     unique_name = f"{base_name}_{int(time.time())}{suffix}"
 
-    dest_path = UPLOAD_DIR / unique_name
+    # dest_path = UPLOAD_DIR / unique_name
 
-    # ✅ save uploaded file permanently
-    content = await file.read()
-    with open(dest_path, "wb") as f:
-        f.write(content)
+    # # ✅ save uploaded file permanently
+    # content = await file.read()
+    # with open(dest_path, "wb") as f:
+    #     f.write(content)
+    file.file.seek(0)
+    file_key = storage.save(file.file, filename=unique_name)
+
+    # If S3 → download to temp for parsing
+    if settings.storage_backend == "s3":
+        temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
+        temp_file.close()
+        local_path = storage.download_file(file_key, temp_file.name)
+        dest_path = Path(local_path)
+    else:
+        dest_path = Path(file_key)
 
     # ✅ parse using saved file
     return await _run_parse(dest_path, display_name=file.filename)
