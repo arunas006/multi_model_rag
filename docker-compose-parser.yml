@@ -27,14 +27,14 @@ services:
 
   ollama:
     image: ollama/ollama:latest
-
-    container_name: ollama_service
-
     ports:
       - "11434:11434"
 
     volumes:
       - ollama_models:/root/.ollama
+      - ./ollama-init.sh:/ollama-init.sh
+
+    entrypoint: ["/bin/sh", "/ollama-init.sh"]
 
     restart: unless-stopped
 
